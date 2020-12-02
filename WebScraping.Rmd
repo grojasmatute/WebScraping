@@ -1,0 +1,183 @@
+---
+title: "Introduction to Web Scraping in R"
+author: "Gustavo Rojas-Matute"
+date: "August 2020"
+institution: "American University"
+
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+Web scraping is a great tool for research. For instance, we can extract and build indicators based on the client reviews in Amazon or Yelp, or just counting the numbers of certain words, or extracting tables that are not available through APIs. The Economic Policy Index is based on counting words related to economic uncertainty in newspapers (https://www.policyuncertainty.com). This tutorial offers some basic web scraping tools in R. 
+
+
+## HTML structure and the Inspect Element 
+When scraping webs, it is important to familiarize with HTML elements. Some of the common elements are: "title", "body", "p". 
+Some of the web browsers have the web element inspector tool which is very helpful to understand the structure of the web and how to extract the information we require. 
+
+Before continuing with this tutorial, try to familiarize with the web inspector in your browser.
+In Chrome: View, Developer, Inspect Elements. In Safari: Develop, Show web inspector. 
+
+
+## XML and rvest 
+
+There are at least two helpful packages in R to scrap webs: 
+
+XML: https://cran.r-project.org/web/packages/XML/XML.pdf
+
+rvest: https://cran.r-project.org/web/packages/rvest/rvest.pdf  
+
+In this tutorial, I am more focused on rvest, but I also show and compare some similar tools.  
+
+## Scrapping numbers
+
+In the following web I will extract the forecast temperature for the next five days from the web of the Forecast Weather. If you explore the web, you will realize that the way the temperatures are presented is as follows: Today, Tonight, Sunday, Sunday Night, Monday, Monday Night, Tuesday, Tuesday Nigh and Wednesday. Bellow, you will find 9 numbers that correspond to the Highs and Lows for Saturday, Sunday, Monday and Tuesday, and the High for Wednesday as well. 
+
+Use the inspect element. Click on it and you will see: "p.temp.temp-high". Notice that the HTML element is "p". 
+
+```{r, include=FALSE, echo  = FALSE}
+library(rvest)
+library(tidyverse)
+library(XML)
+library(readr)
+library(stringi)
+```
+
+```{r}
+library(rvest)
+library(tidyverse)
+forecasts <- read_html("https://forecast.weather.gov/MapClick.php?lat=37.7771&lon=-122.4196#.Xl0j6BNKhTY") %>%
+  html_nodes('.temp') %>%
+  html_text()
+```
+
+If you explore "forecasts" this is what you get:
+```{r}
+forecasts
+```
+In this case, I am using tidyverse, because it works very well and faster. A more traditional way would be:
+
+```{r}
+
+
+forecasts_url <- read_html("https://forecast.weather.gov/MapClick.php?lat=37.7771&lon=-122.4196#.Xl0j6BNKhTY") 
+forecasts <-  html_nodes(forecasts_url, '.temp') 
+forecasts <- html_text(forecasts)
+forecasts
+```
+
+
+You can also observe in the web an element that says the "Current conditions at SAN FRANCISCO DOWNTOWN...". Click using your inspect element. The following code will get you a temperature. 
+```{r}
+
+current_conditions <- read_html("https://forecast.weather.gov/MapClick.php?lat=37.7771&lon=-122.4196#.Xl0j6BNKhTY") %>%
+  html_nodes('.myforecast-current-lrg') %>%
+  html_text()
+current_conditions
+```
+
+If you want to store the numbers, you can use the function "parse_number()". At the moment of this tutorial, the current conditions are: 
+
+```{r}
+
+
+parse_number(forecasts)
+parse_number(current_conditions)
+
+```
+
+
+
+## Reading tables 
+If you want to extract tables from a web, you can either use XML "readHTMLTable()" or rvest "read_table()"
+Explore the link bellow first to explore the web an the table. 
+
+```{r}
+## Reading table with XML
+require(readr)
+library(XML)
+srts <- htmlParse("http://apps.saferoutesinfo.org/legislation_funding/state_apportionment.cfm")
+table1 <- readHTMLTable(srts,stringsAsFactors = FALSE)
+head(data.frame(table1))
+```
+
+Using rvest:
+
+```{r}
+## Reading table with rvest
+library(rvest)
+library(tidyverse)
+table2 <- read_html("http://apps.saferoutesinfo.org/legislation_funding/state_apportionment.cfm") %>%
+  html_nodes("table") %>%
+  html_table()
+head(data.frame(table2))
+```
+
+Although XML is very helpful, it seems to me that rvest presents the table easier to handle it. 
+
+Here is a more complicated case. What is interesting is this web has two tables, and we can scrap both separately. However, this table has different rows and columns. 
+
+``` {r}
+table3 <- read_html("https://www.cdc.gov/mmwr/preview/mmwrhtml/mm6128a3.htm?s_cid=mm6128a3_e%0d%0a") %>%
+  html_nodes("table") %>%
+  .[[2]] %>% ## [[2]] refers to the second table element
+  html_table(fill=TRUE)
+
+## Try to explore the output 
+
+```
+
+
+## Counting Words
+
+One of the most interesting uses of web scraping is counting words. For instance, suppose we want to explore if the Federal Reserve Board has a bias toward inflation or a bias toward GDP growth. 
+
+```{r}
+#First, let's call the URL. We will require the stringi package https://cran.r-project.org/web/packages/stringi/stringi.pdf
+library(stringi)
+URL_fed <- 'https://www.federalreserve.gov/monetarypolicy/2020-02-mpr-summary.htm'
+fed <- read_html(URL_fed)
+
+## This URL corresponds to a Monetary Policy Report from the Federal Reserve web
+
+#Now, let's read the text 
+txt <- stri_trim(html_text(html_nodes(fed, "p"))) #Remember that "p" stands for paragraph in HTML
+
+#Counting words
+
+corpus_fed <- data_frame(word=stri_trans_tolower(unlist(stri_extract_all_words(txt))),
+                     count=1)
+corpus_fed$word_number <- 1:nrow(corpus_fed)
+cumsum_corpus_fed <- mutate(group_by(corpus_fed, word), cumsum=cumsum(count))
+
+## 
+filter_fed <- filter(cumsum_corpus_fed, word %in% c("inflation", "growth"))
+
+gg_fed <- ggplot(filter_fed,
+             aes(x=word_number, y=cumsum))
+gg_fed <- gg_fed + geom_line(aes(color=word), size=0.75) + 
+  geom_point(aes(fill=word), shape=21, color="white", size=1.5) + 
+  scale_x_continuous(limits=c(1, nrow(corpus_fed)))+
+  theme_bw() +
+  ylab("Cumulative") +
+  xlab("Word number")
+gg_fed
+
+
+```
+
+## Further readings 
+
+In a very recent research, Laverde-Rojas, et al (2019): "The Consistency of Trust-Sales Relationship in Latin-American E-commerce",  we scrap data from the e-commerce platform "Mercado Libre". You can read the paper here: https://arxiv.org/abs/1911.01280, and get an example of the code here: https://github.com/jcorrean/Web_Scraping_Latin-American_E-commerce/blob/master/Web%20scraping%20example.R
+
+
+
+## References
+
+https://www.scrapingbee.com/blog/web-scraping-r/
+http://www.columbia.edu/~cjd11/charles_dimaggio/DIRE/styled-4/styled-6/code-13/
+
